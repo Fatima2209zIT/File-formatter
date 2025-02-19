@@ -101,6 +101,6 @@ if uploaded_files:
 
 st.markdown("---")
 st.success("🚀 All files processed successfully!")
-        )
+        
 
-st.success("🎉 Processing Completed!")
+
