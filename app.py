@@ -2,92 +2,131 @@
 import streamlit as st
 import pandas as pd
 import os
+import zipfile
+import tempfile
 from io import BytesIO
+import plotly.express as px
 
-st.set_page_config(page_title="💿Data sweeper", layout="wide")
-st.title("💿Data sweeper")
-st.write("Transform your CSV and Excel File formats")
+# Set page configuration
+st.set_page_config(page_title="💿 Data Sweeper", layout="wide")
 
-# Allow multiple file uploads
-uploaded_files = st.file_uploader("Upload files (CSV or Excel):", type=["csv", "xlsx"], accept_multiple_files=True)
+# Dark Mode Toggle
+dark_mode = st.toggle("🌙 Dark Mode", value=True)
 
-if uploaded_files:  # Check if files are uploaded
+def set_theme():
+    return "plotly_dark" if dark_mode else "plotly_white"
+
+st.title("💿 Data Sweeper")
+st.write("**Transform & Enhance Your CSV and Excel Files Instantly!**")
+
+# File uploader
+uploaded_files = st.file_uploader("📤 Upload your CSV or Excel files:", type=["csv", "xlsx"], accept_multiple_files=True)
+
+# Process uploaded files
+processed_files = []
+if uploaded_files:
     for file in uploaded_files:
         file_name = file.name
         file_ext = os.path.splitext(file_name)[-1].lower()
-
-        # Read the file
         try:
             if file_ext == ".csv":
                 df = pd.read_csv(file)
             elif file_ext == ".xlsx":
-                df = pd.read_excel(file, engine='openpyxl')  # Use `openpyxl` for XLSX
+                df = pd.read_excel(file, engine='openpyxl')
             else:
-                st.error(f"Unsupported file type: {file_ext}")
+                st.error(f"❌ Unsupported file type: {file_ext}")
                 continue
+        except Exception as e:
+            st.error(f"❌ Error reading the file: {e}")
+            continue
 
-            # Display file information
-            st.write(f"**File Name:** {file_name}")
+            st.subheader(f"📂 {file_name}")
             st.write(f"**File Size:** {file.size / 1024:.2f} KB")
-            st.write(f"**File Type:** {file_ext}")
-
-            # Display first few rows
-            st.write("### Preview of the Data")
-            st.dataframe(df.head())
+            
+            # Data Preview
+            with st.expander("🔍 Preview Data"):
+                st.dataframe(df.head())
 
             # Data Cleaning Options
-            st.subheader("🔨 Data Cleaning Options")
+            st.subheader("🛠 Data Cleaning Options")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button(f"🗑 Remove Duplicates - {file_name}"):
+                    df.drop_duplicates(inplace=True)
+                    st.success("Duplicates removed!")
 
-            if st.checkbox(f"Clean Data for {file_name}"):
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    if st.button(f"Remove Duplicates from {file_name}"):
-                        df.drop_duplicates(inplace=True)
-                        st.success(f"Duplicates removed from {file_name}")
-
-                with col2:
-                    if st.button(f"Fill Missing Values for {file_name}"):
-                        numeric_cols = df.select_dtypes(include=['number']).columns
-                        df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].mean())
-                        st.success(f"Missing values filled for {file_name}")
-
-            # Select Columns to Convert
-            st.subheader("🛠 Select Columns to Convert")
-            columns = st.multiselect(f"Select columns to convert for {file_name}", df.columns, default=df.columns)
-            df = df[columns]
+            with col2:
+                if st.button(f"📌 Fill Missing Values - {file_name}"):
+                    numeric_cols = df.select_dtypes(include=['number']).columns
+                    df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].mean())
+                    st.success("Missing values filled!")
+            
+            with col3:
+                if st.button(f"🚮 Drop Empty Columns - {file_name}"):
+                    df.dropna(axis=1, how='all', inplace=True)
+                    st.success("Empty columns removed!")
+            
+            # Text Standardization
+            if st.checkbox(f"🔠 Convert Text to Lowercase - {file_name}"):
+                text_cols = df.select_dtypes(include=['object']).columns
+                df[text_cols] = df[text_cols].astype(str).apply(lambda x: x.str.lower())
+                st.success("Text converted to lowercase!")
 
             # Data Visualization
             st.subheader("📊 Data Visualization")
-            if st.checkbox(f"Show Data Visualization for {file_name}"):
-                st.bar_chart(df.select_dtypes(include=['number']).iloc[:, :2])
-
+            numeric_columns = df.select_dtypes(include=['number']).columns
+            if len(numeric_columns) >= 2:
+                chart_type = st.selectbox("Choose chart type:", ["Bar Chart", "Pie Chart", "Line Chart"], key=file_name)
+                x_col = st.selectbox("Select X-axis:", numeric_columns, key=f"x_{file_name}")
+                y_col = st.selectbox("Select Y-axis:", numeric_columns, key=f"y_{file_name}")
+                
+                if chart_type == "Bar Chart":
+                    fig = px.bar(df, x=x_col, y=y_col, title="Bar Chart", template=set_theme())
+                elif chart_type == "Pie Chart":
+                    fig = px.pie(df, names=x_col, values=y_col, title="Pie Chart", template=set_theme())
+                elif chart_type == "Line Chart":
+                    fig = px.line(df, x=x_col, y=y_col, title="Line Chart", template=set_theme())
+                
+                st.plotly_chart(fig)
+            
             # File Conversion Options
-            st.subheader("📁 Conversion Options")
-            conversion_type = st.radio(f"Convert {file_name} to:", ["CSV", "Excel"], key=file.name)
+            st.subheader("📁 Convert & Download")
+            conversion_type = st.radio("Convert to:", ["CSV", "Excel"], key=f"convert_{file_name}")
+            buffer = BytesIO()
+            new_file_name = file_name.replace(file_ext, ".csv" if conversion_type == "CSV" else ".xlsx")
+            
+            if conversion_type == "CSV":
+                df.to_csv(buffer, index=False)
+                mime_type = "text/csv"
+            else:
+                df.to_excel(buffer, index=False, engine='openpyxl')
+                mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            
+            buffer.seek(0)
+            processed_files.append((new_file_name, buffer, mime_type))
 
-            if st.button(f"Convert {file_name} to {conversion_type}"):
-                buffer = BytesIO()
-                if conversion_type == "CSV":
-                    df.to_csv(buffer, index=False)
-                    new_file_name = file_name.replace(file_ext, ".csv")
-                    mime_type = "text/csv"
-                elif conversion_type == "Excel":
-                    df.to_excel(buffer, index=False, engine='openpyxl')
-                    new_file_name = file_name.replace(file_ext, ".xlsx")
-                    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            # Download Button
+            st.download_button(
+                label=f"⬇️ Download {new_file_name}",
+                data=buffer,
+                file_name=new_file_name,
+                mime=mime_type,
+            )
 
-                buffer.seek(0)
+# Download all processed files as a ZIP
+if processed_files:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
+        with zipfile.ZipFile(tmp_zip, 'w') as zipf:
+            for file_name, buffer, _ in processed_files:
+                zipf.writestr(file_name, buffer.getvalue())
+        
+    with open(tmp_zip.name, "rb") as f:
+        st.download_button(
+            label="⬇️ Download All Processed Files as ZIP",
+            data=f,
+            file_name="processed_files.zip",
+            mime="application/zip",
+        )
 
-                # Download Button
-                st.download_button(
-                    label=f"⬇️ Download {new_file_name}",
-                    data=buffer,
-                    file_name=new_file_name,
-                    mime=mime_type
-                )
-
-        except Exception as e:
-            st.error(f"Error processing {file_name}: {e}")
-
-st.success("🎉 All files processed successfully!")
+st.success("🎉 Processing Completed!")
